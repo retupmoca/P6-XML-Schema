@@ -1,0 +1,11 @@
+{
+    "name" : "XML::Schema",
+    "version" : "1.0.0",
+    "author" : "github:retupmoca",
+    "description" : "Module to use XSD schemas",
+    "depends" : [ "XML" ],
+    "provides" : {
+        "XML::Schema" : "lib/XML/Schema.pm6"
+    },
+    "source-url" : "git://github.com/retupmoca/P6-XML-Schema.git"
+}
