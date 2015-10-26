@@ -96,9 +96,11 @@ method !process-element-to-xml($name, $element, $data) {
             @nodes.push(~$data);
         }
         elsif $type<sequence>:exists {
+            my %seen;
             for $type<sequence>.list {
                 my $count = 0;
                 if $data{$_<name>}:exists {
+                    %seen{$_<name>}++;
                     my $items = $data{$_<name>};
                     for $items.list -> $item {
                         @nodes.push(self!process-element-to-xml(
@@ -111,6 +113,9 @@ method !process-element-to-xml($name, $element, $data) {
 
                 die "Not enough $_<name> elements!" if $count < $_<element><min-occurs>;
                 die "Too many $_<name> elements!" if $count > $_<element><max-occurs>;
+            }
+            for $data.keys {
+                die "Data not in schema: $_!" unless %seen{$_};
             }
         }
         else {

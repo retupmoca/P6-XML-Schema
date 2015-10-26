@@ -2,7 +2,7 @@ use v6;
 
 use Test;
 
-plan 7;
+plan 8;
 
 use XML::Schema;
 
@@ -56,3 +56,12 @@ ok $data<Address> == 6, 'and the correct number of sub-elements';
 
 dies-ok -> { $schema.to-xml(Address => { Recipient => 'Owner' }) },
    'dies when missing a required element';
+
+dies-ok -> { $schema.to-xml(Address => { Recipient => 'Owner',
+                                         extra     => 'stuff',
+                                         House     => '1234',
+                                         Street    => 'Main St',
+                                         Town      => 'Example',
+                                         PostCode  => '12345',
+                                         Country   => 'US'}) },
+   'rejects extra data';
