@@ -7,8 +7,12 @@ has $.schema;
 has %!elements;
 has %!types;
 
-multi method new(XML::Document :$schema!) {
+multi method new(XML::Element :$schema!) {
     self.bless(:$schema);
+}
+
+multi method new(XML::Document :$schema!) {
+    self.new(:schema($schema.root));
 }
 
 multi method new(Str :$schema!) {
@@ -72,7 +76,7 @@ sub build-element($x-e) {
 submethod BUILD(:$!schema!) {
     my $*anon-type-count = 1;
 
-    my $*ns-prefix = ~$!schema.root.nsPrefix('http://www.w3.org/2001/XMLSchema');
+    my $*ns-prefix = ~$!schema.nsPrefix('http://www.w3.org/2001/XMLSchema');
     $*ns-prefix = $*ns-prefix ~ ':' if $*ns-prefix;
     my %elements;
     my %*types;
