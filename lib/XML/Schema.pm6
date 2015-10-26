@@ -30,9 +30,9 @@ sub build-type($x-e) {
             }
             if $_.name eq $*ns-prefix~'attribute' {
                 my %attrib;
-                %attrib<name> = $_<name>;
-                %attrib<required> = True if $_<use> eq 'required';
-                %attrib<type> = $_<type>;
+                %attrib<name> = $_<name> if $_<name>;
+                %attrib<required> = True if $_<use> && $_<use> eq 'required';
+                %attrib<type> = $_<type> if $_<type>;
                 %ret<attributes>.push(%attrib);
             }
         }
@@ -48,8 +48,8 @@ sub build-element($x-e) {
     my $type = $x-e<type>;
     unless $type {
         my @sub = $x-e.elements;
-        if @sub[0] && (@sub[0].name eq $*ns-prefix~'complexType')
-                   || (@sub[0].name eq $*ns-prefix~'simpleType') {
+        if @sub[0] && ((@sub[0].name eq $*ns-prefix~'complexType')
+                    || (@sub[0].name eq $*ns-prefix~'simpleType')) {
             $type = '__p6xmls_anon_' ~ $*anon-type-count++;
             %*types{$type} = build-type(@sub[0]);
         }
@@ -60,10 +60,11 @@ sub build-element($x-e) {
     $max = Inf if $max ~~ m:i/^unbounded$/;
 
     my %ret;
+    %ret<ref> = $x-e<ref> if $x-e<ref>;
     %ret<type> = $type;
     %ret<min-occurs> = $min;
     %ret<max-occurs> = $max;
-    %ret<type-builtin> = True if $type ~~ /^$*ns-prefix/;
+    %ret<type-builtin> = True if $type && $type ~~ /^$*ns-prefix/;
 
     return %ret;
 }
@@ -96,7 +97,10 @@ multi method new(IO :$schema!) {
     self.new(:schema(from-xml-stream($schema)));
 }
 
-method !process-element-to-xml($name, $element, $data) {
+method !process-element-to-xml($name, $element is copy, $data) {
+    if $element<ref> {
+        $element = %!elements{$element<ref>};
+    }
     my @nodes;
     if !$element<type> || $element<type-builtin> {
         # builtin type
@@ -168,7 +172,10 @@ multi method to-xml(*%data) {
     self.to-xml(%data);
 }
 
-method !process-element-from-xml($name, $element, $data) {
+method !process-element-from-xml($name, $element is copy, $data) {
+    if $element<ref> {
+        $element = %!elements{$element<ref>};
+    }
     if !$element<type> || $element<type-builtin> {
         # builtin type
         #
@@ -190,9 +197,10 @@ method !process-element-from-xml($name, $element, $data) {
             my $element = @elements.shift;
             for $type<sequence>.list {
                 my $count = 0;
-                while $element && $element.name eq $_<name> {
-                    %ret{$_<name>} = self!process-element-from-xml(
-                                            $_<name>,
+                my $name = $_<name> || $_<element><ref>;
+                while $element && $element.name eq $name {
+                    %ret{$name} = self!process-element-from-xml(
+                                            $name,
                                             $_<element>,
                                             $element);
                     $element = @elements.shift;
