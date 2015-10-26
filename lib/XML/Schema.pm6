@@ -45,8 +45,8 @@ sub build-element($x-e) {
     }
 
     return { type => $type,
-             min-occurs => $x-e<minOccurs>,
-             max-occurs => $x-e<maxOccurs> };
+             min-occurs => $x-e<minOccurs> || 1,
+             max-occurs => $x-e<maxOccurs> || 1 };
 }
 
 submethod BUILD(:$!schema!) {
@@ -93,10 +93,20 @@ method !process-element-to-xml($name, $element, $data) {
         }
         elsif $type<sequence>:exists {
             for $type<sequence>.list {
-                # TODO: min/max occurs validation
-                @nodes.push(self!process-element-to-xml($_<name>,
-                                                        $_<element>,
-                                                        $data{$_<name>})) if $data{$_<name>};
+                my $count = 0;
+                if $data{$_<name>}:exists {
+                    my $items = $data{$_<name>};
+                    for $items.list -> $item {
+                        @nodes.push(self!process-element-to-xml(
+                                           $_<name>,
+                                           $_<element>,
+                                           $item));
+                        $count++;
+                    }
+                }
+
+                die "Not enough $_<name> elements!" if $count < $_<element><min-occurs>;
+                die "Too many $_<name> elements!" if $count > $_<element><max-occurs>;
             }
         }
         else {
@@ -141,14 +151,18 @@ method !process-element-from-xml($name, $element, $data) {
             my @elements = $data.elements;
             my $element = @elements.shift;
             for $type<sequence>.list {
-                # TODO: min/max occurs validation
+                my $count = 0;
                 while $element && $element.name eq $_<name> {
                     %ret{$_<name>} = self!process-element-from-xml(
                                             $_<name>,
                                             $_<element>,
                                             $element);
                     $element = @elements.shift;
+                    $count++;
                 }
+
+                die "Not enough $_<name> elements!" if $count < $_<element><min-occurs>;
+                die "Too many $_<name> elements!" if $count > $_<element><max-occurs>;
             }
             return %ret;
         }

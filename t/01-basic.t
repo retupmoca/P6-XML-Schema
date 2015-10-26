@@ -2,7 +2,7 @@ use v6;
 
 use Test;
 
-plan 6;
+plan 7;
 
 use XML::Schema;
 
@@ -53,3 +53,6 @@ my $data = $schema.from-xml($xml);
 ok $data ~~ Hash, 'Got some perl data back from XML';
 ok $data == 1, 'With one top-level key';
 ok $data<Address> == 6, 'and the correct number of sub-elements';
+
+dies-ok -> { $schema.to-xml(Address => { Recipient => 'Owner' }) },
+   'dies when missing a required element';
