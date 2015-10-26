@@ -194,8 +194,11 @@ method !process-element-from-xml($name, $element, $data) {
                 die "Not enough $_<name> elements!" if $count < $_<element><min-occurs>;
                 die "Too many $_<name> elements!" if $count > $_<element><max-occurs>;
             }
+            die "Unknown elements remaining!" if @elements;
             if $type<attributes> {
+                my %seen_attrib;
                 for $type<attributes>.list {
+                    %seen_attrib{$_<name>}++;
                     if $data.attribs{$_<name>}:exists {
                         %ret{$_<name>} = $data.attribs{$_<name>};
                     }
@@ -203,7 +206,11 @@ method !process-element-from-xml($name, $element, $data) {
                         die "Required attribute $_<name> not found!";
                     }
                 }
+                for $data.attribs.keys {
+                    die "Unknown attribute $_!" unless %seen_attrib{$_};
+                }
             }
+
             return %ret;
         }
         else {
