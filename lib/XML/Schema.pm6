@@ -44,9 +44,13 @@ sub build-element($x-e) {
         }
     }
 
+    my $min = $x-e<minOccurs> || 1;
+    my $max = $x-e<maxOccurs> || 1;
+    $max = Inf if $max ~~ m:i/^unbounded$/;
+
     return { type => $type,
-             min-occurs => $x-e<minOccurs> || 1,
-             max-occurs => $x-e<maxOccurs> || 1 };
+             min-occurs => $min,
+             max-occurs => $max };
 }
 
 submethod BUILD(:$!schema!) {
