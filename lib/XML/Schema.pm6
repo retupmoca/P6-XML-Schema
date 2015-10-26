@@ -16,11 +16,11 @@ multi method new(Str :$schema!) {
 }
 
 sub build-type($x-e) {
-    if $x-e.name eq 'xs:complexType' {
+    if $x-e.name eq $*ns-prefix~'complexType' {
         my %ret;
         %ret<complex> = True;
         for $x-e.elements {
-            if $_.name eq 'xs:sequence' {
+            if $_.name eq $*ns-prefix~'sequence' {
                 my @schema-elements;
                 for $_.elements {
                    @schema-elements.push((name => $_<name>,
@@ -28,7 +28,7 @@ sub build-type($x-e) {
                 }
                 %ret<sequence> = @schema-elements;
             }
-            if $_.name eq 'xs:attribute' {
+            if $_.name eq $*ns-prefix~'attribute' {
                 my %attrib;
                 %attrib<name> = $_<name>;
                 %attrib<required> = True if $_<use> eq 'required';
@@ -38,7 +38,7 @@ sub build-type($x-e) {
         }
         return %ret;
     }
-    elsif $x-e.name eq 'xs:simpleType' {
+    elsif $x-e.name eq $*ns-prefix~'simpleType' {
         # idk
         return { simple => True };
     }
@@ -48,7 +48,8 @@ sub build-element($x-e) {
     my $type = $x-e<type>;
     unless $type {
         my @sub = $x-e.elements;
-        if @sub[0] && @sub[0].name eq 'xs:complexType'|'xs:simpleType' {
+        if @sub[0] && (@sub[0].name eq $*ns-prefix~'complexType')
+                   || (@sub[0].name eq $*ns-prefix~'simpleType') {
             $type = '__p6xmls_anon_' ~ $*anon-type-count++;
             %*types{$type} = build-type(@sub[0]);
         }
@@ -58,22 +59,29 @@ sub build-element($x-e) {
     my $max = $x-e<maxOccurs> || 1;
     $max = Inf if $max ~~ m:i/^unbounded$/;
 
-    return { type => $type,
-             min-occurs => $min,
-             max-occurs => $max };
+    my %ret;
+    %ret<type> = $type;
+    %ret<min-occurs> = $min;
+    %ret<max-occurs> = $max;
+    %ret<type-builtin> = True if $type ~~ /^$*ns-prefix/;
+
+    return %ret;
 }
 
 submethod BUILD(:$!schema!) {
     my $*anon-type-count = 1;
 
+    my $*ns-prefix = ~$!schema.root.nsPrefix('http://www.w3.org/2001/XMLSchema');
+    $*ns-prefix = $*ns-prefix ~ ':' if $*ns-prefix;
     my %elements;
     my %*types;
 
     for $!schema.elements {
-        if $_.name eq 'xs:element' {
+        if $_.name eq $*ns-prefix~'element' {
             %elements{$_<name>} = build-element($_);
         }
-        if $_.name eq 'xs:complexType'|'xs:simpleType' {
+        if ($_.name eq $*ns-prefix~'complexType')
+         ||($_.name eq $*ns-prefix~'simpleType') {
             %*types{$_<name>} = build-type($_);
         }
     }
@@ -90,7 +98,7 @@ multi method new(IO :$schema!) {
 
 method !process-element-to-xml($name, $element, $data) {
     my @nodes;
-    if !$element<type> || $element<type> ~~ /^xs\:/ {
+    if !$element<type> || $element<type-builtin> {
         # builtin type
         #
         # woo *punt*
@@ -161,7 +169,7 @@ multi method to-xml(*%data) {
 }
 
 method !process-element-from-xml($name, $element, $data) {
-    if !$element<type> || $element<type> ~~ /^xs\:/ {
+    if !$element<type> || $element<type-builtin> {
         # builtin type
         #
         # woo *punt*
