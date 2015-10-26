@@ -17,6 +17,8 @@ multi method new(Str :$schema!) {
 
 sub build-type($x-e) {
     if $x-e.name eq 'xs:complexType' {
+        my %ret;
+        %ret<complex> = True;
         for $x-e.elements {
             if $_.name eq 'xs:sequence' {
                 my @schema-elements;
@@ -24,9 +26,17 @@ sub build-type($x-e) {
                    @schema-elements.push((name => $_<name>,
                                           element => build-element($_)).hash);
                 }
-                return { complex => True, sequence => @schema-elements };
+                %ret<sequence> = @schema-elements;
+            }
+            if $_.name eq 'xs:attribute' {
+                my %attrib;
+                %attrib<name> = $_<name>;
+                %attrib<required> = True if $_<use> eq 'required';
+                %attrib<type> = $_<type>;
+                %ret<attributes>.push(%attrib);
             }
         }
+        return %ret;
     }
     elsif $x-e.name eq 'xs:simpleType' {
         # idk
@@ -114,6 +124,17 @@ method !process-element-to-xml($name, $element, $data) {
                 die "Not enough $_<name> elements!" if $count < $_<element><min-occurs>;
                 die "Too many $_<name> elements!" if $count > $_<element><max-occurs>;
             }
+            if $type<attributes> {
+                for $type<attributes>.list {
+                    if $data{$_<name>}:exists {
+                        %seen{$_<name>}++;
+                        @nodes.push($_<name> => ~$data{$_<name>});
+                    }
+                    elsif $_<required> {
+                        die "Required attribute $_<name> not found!";
+                    }
+                }
+            }
             for $data.keys {
                 die "Data not in schema: $_!" unless %seen{$_};
             }
@@ -172,6 +193,16 @@ method !process-element-from-xml($name, $element, $data) {
 
                 die "Not enough $_<name> elements!" if $count < $_<element><min-occurs>;
                 die "Too many $_<name> elements!" if $count > $_<element><max-occurs>;
+            }
+            if $type<attributes> {
+                for $type<attributes>.list {
+                    if $data.attribs{$_<name>}:exists {
+                        %ret{$_<name>} = $data.attribs{$_<name>};
+                    }
+                    elsif $_<required> {
+                        die "Required attribute $_<name> not found!";
+                    }
+                }
             }
             return %ret;
         }
