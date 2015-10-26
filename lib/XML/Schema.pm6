@@ -120,8 +120,52 @@ multi method to-xml(*%data) {
     self.to-xml(%data);
 }
 
+method !process-element-from-xml($name, $element, $data) {
+    if !$element<type> || $element<type> ~~ /^xs\:/ {
+        # builtin type
+        #
+        # woo *punt*
+        # TODO
+        return $data.contents.join;
+    }
+    else {
+        my $type = %!types{$element<type>};
+        die "Can't find type $type!" unless $type;
+        if $type<simple> {
+            # woo *punt*
+            # TODO
+            return $data.contents.join;
+        }
+        elsif $type<sequence>:exists {
+            my %ret;
+            my @elements = $data.elements;
+            my $element = @elements.shift;
+            for $type<sequence>.list {
+                # TODO: min/max occurs validation
+                while $element && $element.name eq $_<name> {
+                    %ret{$_<name>} = self!process-element-from-xml(
+                                            $_<name>,
+                                            $_<element>,
+                                            $element);
+                    $element = @elements.shift;
+                }
+            }
+            return %ret;
+        }
+        else {
+            die "Don't know how to handle complex type $type";
+        }
+    }
+}
+
 multi method from-xml(XML::Document $xml) {
-    fail "NYI";
+    my $root = $xml.root.name;
+    die "Can't find $root as a top-level schema element!" if !(%!elements{$root}:exists);
+    my %ret;
+    %ret{$root} = self!process-element-from-xml($root,
+                                                %!elements{$root},
+                                                $xml.root);
+    return %ret;
 }
 
 multi method from-xml(Str $xml) {

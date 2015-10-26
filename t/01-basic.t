@@ -50,10 +50,6 @@ my $xml = $schema.to-xml(Address => { Recipient => 'Owner',
 ok $xml ~~ XML::Document, 'Got a valid XML document from perl data';
 
 my $data = $schema.from-xml($xml);
-todo 'NYI', 1;
 ok $data ~~ Hash, 'Got some perl data back from XML';
-skip 'NYI', 2;
-if 0 {
 ok $data == 1, 'With one top-level key';
 ok $data<Address> == 6, 'and the correct number of sub-elements';
-}
