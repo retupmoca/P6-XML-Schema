@@ -6,6 +6,7 @@ has $.schema;
 
 has %!elements;
 has %!types;
+has $!target-namespace;
 
 multi method new(XML::Element :$schema!) {
     self.bless(:$schema);
@@ -50,12 +51,21 @@ sub build-type($x-e) {
 
 sub build-element($x-e) {
     my $type = $x-e<type>;
+    my $type-ns = $x-e.nsURI() || '__DEFAULT__';
+    if $type {
+        if $type ~~ s/^(\w+)\:// {
+            my $ns-prefix = ~$0;
+            $type-ns = $x-e.nsURI($ns-prefix) || '__DEFAULT__';
+        }
+    }
     unless $type {
         my @sub = $x-e.elements;
         if @sub[0] && ((@sub[0].name eq $*ns-prefix~'complexType')
                     || (@sub[0].name eq $*ns-prefix~'simpleType')) {
             $type = '__p6xmls_anon_' ~ $*anon-type-count++;
-            %*types{$type} = build-type(@sub[0]);
+            $type-ns = $*target-ns;
+            %*types{$*target-ns}{$type} = build-type(@sub[0]);
+            #dd %*types;
         }
     }
 
@@ -64,11 +74,18 @@ sub build-element($x-e) {
     $max = Inf if $max ~~ m:i/^unbounded$/;
 
     my %ret;
-    %ret<ref> = $x-e<ref> if $x-e<ref>;
+    if $x-e<ref> {
+        %ret<ref> = $x-e<ref> if $x-e<ref>;
+        %ret<ref-namespace> = $x-e.nsURI || '__DEFAULT__';
+        if %ret<ref> ~~ s/^(\w+)\:// {
+            %ret<ref-namespace> = $x-e.nsURI(~$0) || '__DEFAULT__';
+        }
+    }
     %ret<type> = $type;
+    %ret<type-namespace> = $type-ns;
     %ret<min-occurs> = $min;
     %ret<max-occurs> = $max;
-    %ret<type-builtin> = True if $type && $type ~~ /^$*ns-prefix/;
+    %ret<type-builtin> = True if $type && $type-ns eq 'http://www.w3.org/2001/XMLSchema';
 
     return %ret;
 }
@@ -81,13 +98,18 @@ submethod BUILD(:$!schema!) {
     my %elements;
     my %*types;
 
+    $!target-namespace = $!schema<targetNamespace> || '__DEFAULT__';
+    my $*target-ns = $!target-namespace;
+
+    %*types{$!target-namespace} = Hash.new;
+
     for $!schema.elements {
         if $_.name eq $*ns-prefix~'element' {
-            %elements{$_<name>} = build-element($_);
+            %elements{$!target-namespace}{$_<name>} = build-element($_);
         }
         if ($_.name eq $*ns-prefix~'complexType')
          ||($_.name eq $*ns-prefix~'simpleType') {
-            %*types{$_<name>} = build-type($_);
+            %*types{$!target-namespace}{$_<name>} = build-type($_);
         }
     }
 
@@ -103,7 +125,9 @@ multi method new(IO :$schema!) {
 
 method !process-element-to-xml($name, $element is copy, $data) {
     if $element<ref> {
-        $element = %!elements{$element<ref>};
+        my $ref = $element<ref>;
+        my $ref-ns = $element<ref-namespace>;
+        $element = %!elements{$ref-ns}{$ref};
     }
     my @nodes;
     if !$element<type> || $element<type-builtin> {
@@ -114,8 +138,8 @@ method !process-element-to-xml($name, $element is copy, $data) {
         @nodes.push(~$data);
     }
     else {
-        my $type = %!types{$element<type>};
-        die "Can't find type $type!" unless $type;
+        my $type = %!types{$element<type-namespace>}{$element<type>};
+        die "Can't find type $element<type-namespace> - $element<type>!" unless $type;
         if $type<simple> {
             # woo *punt*
             # TODO
@@ -166,9 +190,9 @@ multi method to-xml(%data) {
     die "Please pass exactly one root element" if %data != 1;
 
     my $root = %data.keys.[0];
-    die "Can't find $root as a top-level schema element!" if !(%!elements{$root}:exists);
+    die "Can't find $root as a top-level schema element!" if !(%!elements{$!target-namespace}{$root}:exists);
 
-    my $element = self!process-element-to-xml($root, %!elements{$root}, %data{$root});
+    my $element = self!process-element-to-xml($root, %!elements{$!target-namespace}{$root}, %data{$root});
     return XML::Document.new($element);
 }
 
@@ -178,7 +202,9 @@ multi method to-xml(*%data) {
 
 method !process-element-from-xml($name, $element is copy, $data) {
     if $element<ref> {
-        $element = %!elements{$element<ref>};
+        my $ref = $element<ref>;
+        my $ref-ns = $element<ref-namespace>;
+        $element = %!elements{$ref-ns}{$ref};
     }
     if !$element<type> || $element<type-builtin> {
         # builtin type
@@ -188,8 +214,8 @@ method !process-element-from-xml($name, $element is copy, $data) {
         return $data.contents.join;
     }
     else {
-        my $type = %!types{$element<type>};
-        die "Can't find type $type!" unless $type;
+        my $type = %!types{$element<type-namespace>}{$element<type>};
+        die "Can't find type $element<type-namespace> - $element<type>!" unless $type;
         if $type<simple> {
             # woo *punt*
             # TODO
@@ -201,9 +227,18 @@ method !process-element-from-xml($name, $element is copy, $data) {
             my $element = @elements.shift;
             for $type<sequence>.list {
                 my $count = 0;
-                my $name = $_<name> || $_<element><ref>;
+                my $name;
+                if $_<name> {
+                    $name = $_<name>;
+                }
+                else {
+                    $name = $_<element><ref>;
+                    $name = $data.nsPrefix($_<element><ref-namespace>) ~ ':' ~ $name if $_<element><ref-namespace> ne '__DEFAULT__';
+                }
                 while $element && $element.name eq $name {
-                    %ret{$name} = self!process-element-from-xml(
+                    my $rname = $name;
+                    $rname ~~ s/^\w+\://;
+                    %ret{$rname} = self!process-element-from-xml(
                                             $name,
                                             $_<element>,
                                             $element);
@@ -227,6 +262,7 @@ method !process-element-from-xml($name, $element is copy, $data) {
                     }
                 }
                 for $data.attribs.keys {
+                    next if $_ ~~ /^xmlns/;
                     die "Unknown attribute $_!" unless %seen_attrib{$_};
                 }
             }
@@ -241,10 +277,17 @@ method !process-element-from-xml($name, $element is copy, $data) {
 
 multi method from-xml(XML::Document $xml) {
     my $root = $xml.root.name;
-    die "Can't find $root as a top-level schema element!" if !(%!elements{$root}:exists);
+    my $root-ns = '__DEFAULT__';
+    if $root ~~ s/^(\w+)\:// {
+        $root-ns = $xml.root.nsURI(~$0) || '__DEFAULT__';
+    }
+
+    die "Wrong namespace!" if $root-ns ne $!target-namespace;
+
+    die "Can't find $root as a top-level schema element!" if !(%!elements{$!target-namespace}{$root}:exists);
     my %ret;
     %ret{$root} = self!process-element-from-xml($root,
-                                                %!elements{$root},
+                                                %!elements{$!target-namespace}{$root},
                                                 $xml.root);
     return %ret;
 }

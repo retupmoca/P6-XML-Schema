@@ -221,8 +221,5 @@ PO1SR
 my $po1-schema = XML::Schema.new(:schema($po1-schema-raw));
 ok $po1-schema ~~ XML::Schema, 'Able to create object from targetNamespace schema';
 
-skip 'NYI', 1;
-if 0 {
 $data = $po1-schema.from-xml($po1-raw);
 ok $data ~~ Hash, 'Able to from-xml example data';
-}
