@@ -60,48 +60,6 @@ class XML::Schema {
         self.new(:schema(from-xml-stream($schema)));
     }
 
-    method !process-element-to-xml($schema-element, $data) {
-        my @nodes;
-        my $type = $schema-element.type;
-        if $type ~~ XML::Schema::SimpleType {
-            @nodes.push(~$data);
-        }
-        else {
-            die "Can't find type for "~$schema-element.name unless $type;
-
-            my %seen;
-            for $type.group.parts.list {
-                my $count = 0;
-                if $data{$_.name}:exists {
-                    %seen{$_.name}++;
-                    my $items = $data{$_.name};
-                    for $items.list -> $item {
-                        @nodes.push(self!process-element-to-xml($_, $item));
-                        $count++;
-                    }
-                }
-
-                die "Not enough $_.name elements!" if $count < $_.min-occurs;
-                die "Too many $_.name elements!" if $count > $_.max-occurs;
-            }
-            if $type.attributes {
-                for $type.attributes.list {
-                    if $data{$_.name}:exists {
-                        %seen{$_.name}++;
-                        @nodes.push($_.name => ~$data{$_.name});
-                    }
-                    elsif $_.required {
-                        die "Required attribute $_.name not found!";
-                    }
-                }
-            }
-            for $data.keys {
-                die "Data not in schema: $_!" unless %seen{$_};
-            }
-        }
-        return XML::Element.craft($schema-element.name, |@nodes);
-    }
-
     multi method to-xml(%data) {
         die "Please pass exactly one root element" if %data != 1;
 
@@ -109,79 +67,14 @@ class XML::Schema {
         my $element = self.get-element($.target-namespace, $root);
         die "Can't find $root as a top-level schema element!" if !$element;
 
-        my $xml-element = self!process-element-to-xml($element, %data{$root});
+        my $xml-element = $element.to-xml(%data{$root});
+        #self!process-element-to-xml($element, %data{$root});
         $xml-element.set('xmlns', self.target-namespace) if self.target-namespace;
         return XML::Document.new($xml-element);
     }
 
     multi method to-xml(*%data) {
         self.to-xml(%data);
-    }
-
-    method !process-element-from-xml($schema-element, $xml-element) {
-        my $type = $schema-element.type;
-        if $type ~~ XML::Schema::SimpleType {
-            return $xml-element.contents.join;
-        }
-        my %ret;
-        my @elements = $xml-element.elements;
-        my $element = @elements.shift;
-        my @parts = name_split($element.name, $element);
-        for $type.group.parts.list {
-            my $need-ns = !$_.internal || $_.qualified || self.qualified-elements;
-            my $count = 0;
-            my @ret;
-            while $element
-                  && (($need-ns && @parts[0] eq $_.namespace)
-                      ||(!$need-ns && $element.name !~~ /\:/))
-                  && @parts[1] eq $_.name {
-                @ret.push(self!process-element-from-xml($_, $element));
-                if @elements {
-                    $element = @elements.shift;
-                }
-                else {
-                    $element = Nil;
-                }
-                @parts = name_split($element.name, $element) if $element;
-                $count++;
-            }
-            if @ret {
-                if $_.max-occurs == 1 {
-                    %ret{$_.name} = @ret[0];
-                }
-                else {
-                    %ret{$_.name} = @ret;
-                }
-            }
-
-            die "Not enough {$_.name} elements!" if $count < $_.min-occurs;
-            die "Too many {$_.name} elements (got $count)!" if $count > $_.max-occurs;
-        }
-        die "Unknown elements remaining!" if @elements;
-        if $type.attributes {
-            my %seen_attrib;
-            for $type.attributes.list {
-                my $need-ns = $_.qualified || self.qualified-attributes;
-                my $lookup = $_.name;
-                if $need-ns {
-                    my $ns-prefix = ~$xml-element.nsPrefix($_.namespace) || '';
-                    $lookup = $ns-prefix ~ ':' ~ $lookup if $ns-prefix;
-                }
-                %seen_attrib{$lookup}++;
-                if $xml-element.attribs{$lookup}:exists {
-                    %ret{$_.name} = $xml-element.attribs{$lookup};
-                }
-                elsif $_.required {
-                    die "Required attribute $_.name not found!";
-                }
-            }
-            for $xml-element.attribs.keys {
-                next if $_ ~~ /^xmlns/;
-                die "Unknown attribute $_!" unless %seen_attrib{$_};
-            }
-        }
-
-        return %ret;
     }
 
     multi method from-xml(XML::Document $xml) {
@@ -192,7 +85,8 @@ class XML::Schema {
         die "Can't find @parts[1] as a top-level schema element!" if !$element;
 
         my %ret;
-        %ret{@parts[1]} = self!process-element-from-xml($element, $xml.root);
+        %ret{@parts[1]} = $element.from-xml($xml.root);
+        #self!process-element-from-xml($element, $xml.root);
         return %ret;
     }
 
@@ -255,6 +149,7 @@ class XML::Schema::Element {
     has $.max-occurs;
     has $.internal;
     has $.qualified;
+    has $.nillable;
 
     method new(:$xml-element, :$schema, :$internal = False) {
         my $xsd-ns-prefix = ~$xml-element.nsPrefix('http://www.w3.org/2001/XMLSchema');
@@ -263,6 +158,8 @@ class XML::Schema::Element {
         my $namespace = $schema.target-namespace;
         my $qualified = False;
         $qualified = True if $xml-element<form> && $xml-element<form> eq 'qualified';
+        my $nillable = False;
+        $nillable = True if $xml-element<nillable> && $xml-element<nillable> eq 'true';
 
         my $min = $xml-element<minOccurs> || 1;
         my $max = $xml-element<maxOccurs> || 1;
@@ -302,9 +199,18 @@ class XML::Schema::Element {
                           :max-occurs($max),
                           :$internal);
     }
+
+    method from-xml($xml-element) {
+        return self.type.from-xml($xml-element);
+    }
+
+    method to-xml($data) {
+        my @nodes = self.type.to-xml($data);
+        return XML::Element.craft(self.name, |@nodes);
+    }
 };
 class XML::Schema::RefElement {
-    has $.ref handles <name type namespace internal qualified>;
+    has $.ref handles <name type namespace internal qualified from-xml>;
     has $.min-occurs;
     has $.max-occurs;
 };
@@ -333,19 +239,78 @@ class XML::Schema::Attribute {
 };
 class XML::Schema::Group {
     has @.parts;
+    has $.schema;
     method new(:$xml-element, :$schema) {
         my @parts;
         for $xml-element.elements {
            @parts.push(XML::Schema::Element.new(:$schema, :xml-element($_), :internal));
         }
-        self.bless(:@parts);
+        self.bless(:@parts, :$schema);
     }
 };
-class XML::Schema::Group::Sequence is XML::Schema::Group { };
-class XML::Schema::Group::Any is XML::Schema::Group { };
+class XML::Schema::Group::Sequence is XML::Schema::Group {
+    method from-xml($xml-element) {
+        my %ret;
+        my @elements = $xml-element.elements;
+        my $element = @elements.shift;
+        my @parts = name_split($element.name, $element);
+        for self.parts.list {
+            my $need-ns = !$_.internal || $_.qualified || $.schema.qualified-elements;
+            my $count = 0;
+            my @ret;
+            while $element
+                  && (($need-ns && @parts[0] eq $_.namespace)
+                      ||(!$need-ns && $element.name !~~ /\:/))
+                  && @parts[1] eq $_.name {
+                @ret.push($_.from-xml($element));
+                if @elements {
+                    $element = @elements.shift;
+                }
+                else {
+                    $element = Nil;
+                }
+                @parts = name_split($element.name, $element) if $element;
+                $count++;
+            }
+            if @ret {
+                if $_.max-occurs == 1 {
+                    %ret{$_.name} = @ret[0];
+                }
+                else {
+                    %ret{$_.name} = @ret;
+                }
+            }
+
+            die "Not enough {$_.name} elements!" if $count < $_.min-occurs;
+            die "Too many {$_.name} elements (got $count)!" if $count > $_.max-occurs;
+        }
+        die "Unknown elements remaining!" if @elements;
+        return %ret;
+    }
+    method to-xml($data, :%seen) {
+        my @nodes;
+        for self.parts.list {
+            my $count = 0;
+            if $data{$_.name}:exists {
+                %seen{$_.name}++;
+                my $items = $data{$_.name};
+                for $items.list -> $item {
+                    @nodes.push($_.to-xml($item));
+                    $count++;
+                }
+            }
+
+            die "Not enough $_.name elements!" if $count < $_.min-occurs;
+            die "Too many $_.name elements!" if $count > $_.max-occurs;
+        }
+        return @nodes;
+    }
+};
+class XML::Schema::Group::All is XML::Schema::Group { };
 class XML::Schema::Group::Choice is XML::Schema::Group { };
 class XML::Schema::Type {
     has $.namespace;
+    has $.schema;
     multi method new(:$schema!, :$xml-element!) {
         my $xsd-ns-prefix = ~$xml-element.nsPrefix('http://www.w3.org/2001/XMLSchema');
         $xsd-ns-prefix ~= ':' if $xsd-ns-prefix;
@@ -353,7 +318,7 @@ class XML::Schema::Type {
         my $namespace = $schema.target-namespace;
 
         if $xml-element.name eq $xsd-ns-prefix ~ 'simpleType' {
-            return XML::Schema::SimpleType.new(:$namespace);
+            return XML::Schema::SimpleType.new(:$namespace, :$schema);
         }
 
         my $group;
@@ -362,17 +327,80 @@ class XML::Schema::Type {
             if $_.name eq $xsd-ns-prefix~'sequence' {
                 $group = XML::Schema::Group::Sequence.new(:xml-element($_), :$schema);
             }
+            if $_.name eq $xsd-ns-prefix~'choice' {
+                $group = XML::Schema::Group::Choice.new(:xml-element($_), :$schema);
+            }
+            if $_.name eq $xsd-ns-prefix~'all' {
+                $group = XML::Schema::Group::All.new(:xml-element($_), :$schema);
+            }
             if $_.name eq $xsd-ns-prefix~'attribute' {
                 my $attribute = XML::Schema::Attribute.new(:xml-element($_), :$schema);
                 @attributes.push($attribute) if $attribute;
             }
         }
 
-        return XML::Schema::ComplexType.new(:$namespace, :$group, :@attributes);
+        return XML::Schema::ComplexType.new(:$namespace, :$group, :@attributes, :$schema);
     }
 };
 class XML::Schema::ComplexType is XML::Schema::Type {
     has @.attributes;
     has $.group;
+    method from-xml($xml-element) {
+        my %ret = self.group.from-xml($xml-element).pairs;
+        if self.attributes {
+            my %seen_attrib;
+            for self.attributes.list {
+                my $need-ns = $_.qualified || $.schema.qualified-attributes;
+                my $lookup = $_.name;
+                if $need-ns {
+                    my $ns-prefix = ~$xml-element.nsPrefix($_.namespace) || '';
+                    $lookup = $ns-prefix ~ ':' ~ $lookup if $ns-prefix;
+                }
+                %seen_attrib{$lookup}++;
+                if $xml-element.attribs{$lookup}:exists {
+                    %ret{$_.name} = $xml-element.attribs{$lookup};
+                }
+                elsif $_.required {
+                    die "Required attribute $_.name not found!";
+                }
+            }
+            for $xml-element.attribs.keys {
+                next if $_ ~~ /^xmlns/;
+                die "Unknown attribute $_!" unless %seen_attrib{$_};
+            }
+        }
+
+        return %ret;
+    }
+    method to-xml($data) {
+        my @nodes;
+
+        my %seen;
+        @nodes.append: self.group.to-xml($data, :%seen);
+        if self.attributes {
+            for self.attributes.list {
+                if $data{$_.name}:exists {
+                    %seen{$_.name}++;
+                    @nodes.push($_.name => ~$data{$_.name});
+                }
+                elsif $_.required {
+                    die "Required attribute $_.name not found!";
+                }
+            }
+        }
+        for $data.keys {
+            die "Data not in schema: $_!" unless %seen{$_};
+        }
+        return @nodes;
+    }
 };
-class XML::Schema::SimpleType is XML::Schema::Type { };
+class XML::Schema::SimpleType is XML::Schema::Type {
+    method from-xml($xml-element) {
+        return $xml-element.contents.join;
+    }
+    method to-xml($data) {
+        my @nodes;
+        @nodes.push(~$data);
+        return @nodes;
+    }
+};
