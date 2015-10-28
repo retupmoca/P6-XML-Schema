@@ -2,7 +2,7 @@ use v6;
 
 use Test;
 
-plan 8;
+plan 11;
 
 use XML::Schema;
 
@@ -65,3 +65,39 @@ dies-ok -> { $schema.to-xml(Address => { Recipient => 'Owner',
                                          PostCode  => '12345',
                                          Country   => 'US'}) },
    'rejects extra data';
+
+$schema-raw = q:to/END/;
+<?xml version="1.0" encoding="utf-8"?>
+<xs:schema elementFormDefault="qualified" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+  <xs:element name="Address">
+    <xs:complexType>
+      <xs:choice>
+        <xs:element name="Recipient" type="xs:string" />
+        <xs:element name="House" type="xs:string" />
+        <xs:element name="Street" type="xs:string" />
+        <xs:element name="Town" type="xs:string" />
+        <xs:element name="County" type="xs:string" minOccurs="0" />
+        <xs:element name="PostCode" type="xs:string" />
+        <xs:element name="Country" minOccurs="0">
+          <xs:simpleType>
+            <xs:restriction base="xs:string">
+              <xs:enumeration value="IN" />
+              <xs:enumeration value="DE" />
+              <xs:enumeration value="ES" />
+              <xs:enumeration value="UK" />
+              <xs:enumeration value="US" />
+            </xs:restriction>
+          </xs:simpleType>
+        </xs:element>
+      </xs:choice>
+    </xs:complexType>
+  </xs:element>
+</xs:schema>
+END
+
+$schema = XML::Schema.new(:schema($schema-raw));
+ok $schema ~~ XML::Schema, 'Able to create object from schema (with choice)';
+$xml = $schema.to-xml(Address => { Recipient => 'Owner' });
+ok $xml ~~ XML::Document, 'Got a valid XML document from perl data';
+$data = $schema.from-xml($xml);
+ok $data ~~ Hash, 'Got some perl data back from XML';

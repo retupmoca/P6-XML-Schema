@@ -247,6 +247,25 @@ class XML::Schema::Group {
         }
         self.bless(:@parts, :$schema);
     }
+    method from-xml($xml-element) { ... }
+    method to-xml($data, :%seen) {
+        my @nodes;
+        for self.parts.list {
+            my $count = 0;
+            if $data{$_.name}:exists {
+                %seen{$_.name}++;
+                my $items = $data{$_.name};
+                for $items.list -> $item {
+                    @nodes.push($_.to-xml($item));
+                    $count++;
+                }
+            }
+
+            die "Not enough $_.name elements!" if $count < $_.min-occurs;
+            die "Too many $_.name elements!" if $count > $_.max-occurs;
+        }
+        return @nodes;
+    }
 };
 class XML::Schema::Group::Sequence is XML::Schema::Group {
     method from-xml($xml-element) {
@@ -287,6 +306,48 @@ class XML::Schema::Group::Sequence is XML::Schema::Group {
         die "Unknown elements remaining!" if @elements;
         return %ret;
     }
+};
+class XML::Schema::Group::All is XML::Schema::Group {
+    method from-xml($xml-element) {
+        ...
+    }
+};
+class XML::Schema::Group::Choice is XML::Schema::Group {
+    method from-xml($xml-element) {
+        my %ret;
+        my @elements = $xml-element.elements;
+        my $element = @elements.shift;
+        my @parts = name_split($element.name, $element);
+        for self.parts.list {
+            my $need-ns = !$_.internal || $_.qualified || $.schema.qualified-elements;
+            my $count = 0;
+            my @ret;
+            while $element
+                  && (($need-ns && @parts[0] eq $_.namespace)
+                      ||(!$need-ns && $element.name !~~ /\:/))
+                  && @parts[1] eq $_.name {
+                @ret.push($_.from-xml($element));
+                if @elements {
+                    $element = @elements.shift;
+                }
+                else {
+                    $element = Nil;
+                }
+                @parts = name_split($element.name, $element) if $element;
+                $count++;
+            }
+            if @ret {
+                if $_.max-occurs == 1 {
+                    %ret{$_.name} = @ret[0];
+                }
+                else {
+                    %ret{$_.name} = @ret;
+                }
+            }
+            return %ret if $count;
+        }
+        die "None of the 'choice' parts were found!";
+    }
     method to-xml($data, :%seen) {
         my @nodes;
         for self.parts.list {
@@ -300,14 +361,11 @@ class XML::Schema::Group::Sequence is XML::Schema::Group {
                 }
             }
 
-            die "Not enough $_.name elements!" if $count < $_.min-occurs;
-            die "Too many $_.name elements!" if $count > $_.max-occurs;
+            return @nodes if $count;
         }
-        return @nodes;
+        die "None of the 'choice' parts were found!";
     }
 };
-class XML::Schema::Group::All is XML::Schema::Group { };
-class XML::Schema::Group::Choice is XML::Schema::Group { };
 class XML::Schema::Type {
     has $.namespace;
     has $.schema;
