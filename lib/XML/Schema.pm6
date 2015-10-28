@@ -31,6 +31,8 @@ class XML::Schema {
     has %!elements;
     has %!types;
     has $.target-namespace;
+    has $.qualified-elements;
+    has $.qualified-attributes;
 
     multi method new(XML::Element :$schema!) {
         self.bless(:$schema);
@@ -46,6 +48,12 @@ class XML::Schema {
 
     submethod BUILD(:$!schema!) {
         $!target-namespace = $!schema<targetNamespace> || '';
+        $!qualified-elements = False;
+        $!qualified-elements = True if $!schema<elementFormDefault>
+                                    && $!schema<elementFormDefault> eq 'qualified';
+        $!qualified-attributes = False;
+        $!qualified-attributes = True if $!schema<attributeFormDefault>
+                                      && $!schema<attributeFormDefault> eq 'qualified';
     }
 
     multi method new(IO :$schema!) {
@@ -120,10 +128,11 @@ class XML::Schema {
         my $element = @elements.shift;
         my @parts = name_split($element.name, $element);
         for $type.group.parts.list {
+            my $need-ns = !$_.internal || $_.qualified || self.qualified-elements;
             my $count = 0;
             while $element
-                  && ((!$_.internal && @parts[0] eq $_.namespace)
-                      ||($_.internal && $element.name !~~ /\:/))
+                  && (($need-ns && @parts[0] eq $_.namespace)
+                      ||(!$need-ns && $element.name !~~ /\:/))
                   && @parts[1] eq $_.name {
                 %ret{$_.name} = self!process-element-from-xml($_, $element);
                 if @elements {
@@ -143,9 +152,15 @@ class XML::Schema {
         if $type.attributes {
             my %seen_attrib;
             for $type.attributes.list {
-                %seen_attrib{$_.name}++;
-                if $xml-element.attribs{$_.name}:exists {
-                    %ret{$_.name} = $xml-element.attribs{$_.name};
+                my $need-ns = $_.qualified || self.qualified-attributes;
+                my $lookup = $_.name;
+                if $need-ns {
+                    my $ns-prefix = ~$xml-element.nsPrefix($_.namespace) || '';
+                    $lookup = $ns-prefix ~ ':' ~ $lookup if $ns-prefix;
+                }
+                %seen_attrib{$lookup}++;
+                if $xml-element.attribs{$lookup}:exists {
+                    %ret{$_.name} = $xml-element.attribs{$lookup};
                 }
                 elsif $_.required {
                     die "Required attribute $_.name not found!";
@@ -230,12 +245,15 @@ class XML::Schema::Element {
     has $.min-occurs;
     has $.max-occurs;
     has $.internal;
+    has $.qualified;
 
     method new(:$xml-element, :$schema, :$internal = False) {
         my $xsd-ns-prefix = ~$xml-element.nsPrefix('http://www.w3.org/2001/XMLSchema');
         $xsd-ns-prefix ~= ':' if $xsd-ns-prefix;
 
         my $namespace = $schema.target-namespace;
+        my $qualified = False;
+        $qualified = True if $xml-element<form> && $xml-element<form> eq 'qualified';
 
         my $min = $xml-element<minOccurs> || 1;
         my $max = $xml-element<maxOccurs> || 1;
@@ -267,7 +285,13 @@ class XML::Schema::Element {
             }
         }
 
-        return self.bless(:$namespace, :$type, :$name, :min-occurs($min), :max-occurs($max), :$internal);
+        return self.bless(:$namespace,
+                          :$type,
+                          :$name,
+                          :$qualified,
+                          :min-occurs($min),
+                          :max-occurs($max),
+                          :$internal);
     }
 };
 class XML::Schema::RefElement {
@@ -278,15 +302,20 @@ class XML::Schema::RefElement {
     method type { $.ref.type }
     method namespace { $.ref.namespace }
     method internal { $.ref.internal }
+    method qualified { $.ref.qualified }
 };
 class XML::Schema::Attribute {
     has $.namespace;
     has $.name;
     has $.requred;
     has $.type;
+    has $.qualified;
     method new(:$xml-element, :$schema) {
         return if $xml-element<use> && $xml-element<use> eq 'prohibited';
         my $name = $xml-element<name>;
+
+        my $qualified = False;
+        $qualified = True if $xml-element<form> && $xml-element<form> eq 'qualified';
 
         my $namespace = $schema.target-namespace;
 
@@ -295,7 +324,7 @@ class XML::Schema::Attribute {
 
         my @parts = name_split($xml-element<type>, $xml-element);
         my $type = $schema.get-type(|@parts);
-        self.bless(:$namespace, :$name, :$required, :$type);
+        self.bless(:$namespace, :$name, :$required, :$type, :$qualified);
     }
 };
 class XML::Schema::Group {
