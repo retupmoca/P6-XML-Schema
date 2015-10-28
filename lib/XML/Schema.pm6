@@ -68,7 +68,6 @@ class XML::Schema {
         die "Can't find $root as a top-level schema element!" if !$element;
 
         my $xml-element = $element.to-xml(%data{$root});
-        #self!process-element-to-xml($element, %data{$root});
         $xml-element.set('xmlns', self.target-namespace) if self.target-namespace;
         return XML::Document.new($xml-element);
     }
@@ -86,7 +85,6 @@ class XML::Schema {
 
         my %ret;
         %ret{@parts[1]} = $element.from-xml($xml.root);
-        #self!process-element-from-xml($element, $xml.root);
         return %ret;
     }
 
