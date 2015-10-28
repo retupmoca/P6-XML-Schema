@@ -130,11 +130,12 @@ class XML::Schema {
         for $type.group.parts.list {
             my $need-ns = !$_.internal || $_.qualified || self.qualified-elements;
             my $count = 0;
+            my @ret;
             while $element
                   && (($need-ns && @parts[0] eq $_.namespace)
                       ||(!$need-ns && $element.name !~~ /\:/))
                   && @parts[1] eq $_.name {
-                %ret{$_.name} = self!process-element-from-xml($_, $element);
+                @ret.push(self!process-element-from-xml($_, $element));
                 if @elements {
                     $element = @elements.shift;
                 }
@@ -143,6 +144,14 @@ class XML::Schema {
                 }
                 @parts = name_split($element.name, $element) if $element;
                 $count++;
+            }
+            if @ret {
+                if $_.max-occurs == 1 {
+                    %ret{$_.name} = @ret[0];
+                }
+                else {
+                    %ret{$_.name} = @ret;
+                }
             }
 
             die "Not enough {$_.name} elements!" if $count < $_.min-occurs;
