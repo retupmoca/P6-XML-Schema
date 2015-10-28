@@ -304,14 +304,9 @@ class XML::Schema::Element {
     }
 };
 class XML::Schema::RefElement {
-    has $.ref;
+    has $.ref handles <name type namespace internal qualified>;
     has $.min-occurs;
     has $.max-occurs;
-    method name { $.ref.name }
-    method type { $.ref.type }
-    method namespace { $.ref.namespace }
-    method internal { $.ref.internal }
-    method qualified { $.ref.qualified }
 };
 class XML::Schema::Attribute {
     has $.namespace;
