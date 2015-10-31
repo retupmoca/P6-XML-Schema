@@ -30,6 +30,7 @@ class XML::Schema {
 
     has %!elements;
     has %!types;
+    has %!groups;
     has $.target-namespace;
     has $.qualified-elements;
     has $.qualified-attributes;
@@ -137,6 +138,22 @@ class XML::Schema {
         }
         %!elements{$my-ns}{$name};
     }
+
+    method get-group($id) {
+        unless %!groups{$id} {
+            my $element = $!schema.getElementById($id);
+            $element = $element.elements.[0];
+            my $xsd-ns-prefix = ~$element.nsPrefix('http://www.w3.org/2001/XMLSchema');
+            $xsd-ns-prefix ~= ':' if $xsd-ns-prefix;
+            if $element.name eq $xsd-ns-prefix~'sequence' {
+                %!groups{$id} = XML::Schema::Group::Sequence.new(:schema(self), :xml-element($element));
+            }
+            if $element.name eq $xsd-ns-prefix~'choice' {
+                %!groups{$id} = XML::Schema::Group::Choice.new(:schema(self), :xml-element($element));
+            }
+        }
+        return %!groups{$id};
+    }
 };
 
 class XML::Schema::Element {
@@ -238,7 +255,7 @@ class XML::Schema::Attribute {
 class XML::Schema::Group {
     has @.parts;
     has $.schema;
-    method new(:$xml-element, :$schema) {
+    multi method new(:$xml-element!, :$schema!) {
         my $xsd-ns-prefix = ~$xml-element.nsPrefix('http://www.w3.org/2001/XMLSchema');
         $xsd-ns-prefix ~= ':' if $xsd-ns-prefix;
         my @parts;
@@ -251,6 +268,9 @@ class XML::Schema::Group {
             }
             if $_.name eq $xsd-ns-prefix~'choice' {
                 @parts.push: XML::Schema::Group::Choice.new(:xml-element($_), :$schema);
+            }
+            if $_.name eq $xsd-ns-prefix~'group' && $_<ref> {
+                @parts.push: XML::Schema::Group::Reference.new(:ref($schema.get-group($_<ref>)));
             }
         }
         self.bless(:@parts, :$schema);
@@ -280,6 +300,9 @@ class XML::Schema::Group {
         return @nodes;
     }
 };
+class XML::Schema::Group::Reference is XML::Schema::Group {
+    has $.ref handles <from-xml to-xml>;
+}
 class XML::Schema::Group::Sequence is XML::Schema::Group {
     method from-xml(@elements) {
         my %ret;
