@@ -255,10 +255,10 @@ class XML::Schema::Attribute {
 class XML::Schema::Group {
     has @.parts;
     has $.schema;
-    multi method new(:$xml-element!, :$schema!) {
+    multi method new(:$xml-element!, :$schema!, :$extend) {
         my $xsd-ns-prefix = ~$xml-element.nsPrefix('http://www.w3.org/2001/XMLSchema');
         $xsd-ns-prefix ~= ':' if $xsd-ns-prefix;
-        my @parts;
+        my @parts = $extend ?? $extend.parts !! ();
         for $xml-element.elements {
             if $_.name eq $xsd-ns-prefix~'element' {
                 @parts.push(XML::Schema::Element.new(:$schema, :xml-element($_), :internal));
@@ -431,7 +431,7 @@ class XML::Schema::Group::Choice is XML::Schema::Group {
 class XML::Schema::Type {
     has $.namespace;
     has $.schema;
-    multi method new(:$schema!, :$xml-element!) {
+    multi method new(:$schema!, :$xml-element!, :$extend) {
         my $xsd-ns-prefix = ~$xml-element.nsPrefix('http://www.w3.org/2001/XMLSchema');
         $xsd-ns-prefix ~= ':' if $xsd-ns-prefix;
 
@@ -441,17 +441,18 @@ class XML::Schema::Type {
             return XML::Schema::SimpleType.new(:$namespace, :$schema);
         }
 
+        my $extending-group = $extend ?? $extend.group !! Nil;
         my $group;
-        my @attributes;
+        my @attributes = $extend ?? $extend.attributes !! ();
         for $xml-element.elements {
             if $_.name eq $xsd-ns-prefix~'sequence' {
-                $group = XML::Schema::Group::Sequence.new(:xml-element($_), :$schema);
+                $group = XML::Schema::Group::Sequence.new(:xml-element($_), :$schema, :extend($extending-group));
             }
             if $_.name eq $xsd-ns-prefix~'choice' {
-                $group = XML::Schema::Group::Choice.new(:xml-element($_), :$schema);
+                $group = XML::Schema::Group::Choice.new(:xml-element($_), :$schema, :extend($extending-group));
             }
             if $_.name eq $xsd-ns-prefix~'all' {
-                $group = XML::Schema::Group::All.new(:xml-element($_), :$schema);
+                $group = XML::Schema::Group::All.new(:xml-element($_), :$schema, :extend($extending-group));
             }
             if $_.name eq $xsd-ns-prefix~'attribute' {
                 my $attribute = XML::Schema::Attribute.new(:xml-element($_), :$schema);
@@ -459,17 +460,16 @@ class XML::Schema::Type {
             }
             if $_.name eq $xsd-ns-prefix~'complexContent' {
                 my $kind-elem = $_.elements.[0];
+                my @parts = name_split($kind-elem<base> ,$kind-elem);
+                my $base = $schema.get-type(|@parts);
                 if $kind-elem.name eq $xsd-ns-prefix~'restriction' {
-                    my @parts = name_split($kind-elem<base> ,$kind-elem);
-                    my $base = $schema.get-type(|@parts);
                     # punt!
                     # (this at least allows the *possibility* of creating a correct
                     #  document, even if it doesn't enforce it)
                     return $base;
                 }
                 else {
-                    # extension
-                    die "complexContent NYI";
+                    return self.new(:$schema, :xml-element($kind-elem), :extend($base));
                 }
             }
             if $_.name eq $xsd-ns-prefix~'simpleContent' {
