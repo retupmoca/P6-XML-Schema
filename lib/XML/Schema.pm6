@@ -457,6 +457,24 @@ class XML::Schema::Type {
                 my $attribute = XML::Schema::Attribute.new(:xml-element($_), :$schema);
                 @attributes.push($attribute) if $attribute;
             }
+            if $_.name eq $xsd-ns-prefix~'complexContent' {
+                my $kind-elem = $_.elements.[0];
+                if $kind-elem.name eq $xsd-ns-prefix~'restriction' {
+                    my @parts = name_split($kind-elem<base> ,$kind-elem);
+                    my $base = $schema.get-type(|@parts);
+                    # punt!
+                    # (this at least allows the *possibility* of creating a correct
+                    #  document, even if it doesn't enforce it)
+                    return $base;
+                }
+                else {
+                    # extension
+                    die "complexContent NYI";
+                }
+            }
+            if $_.name eq $xsd-ns-prefix~'simpleContent' {
+                die "simpleContent NYI";
+            }
         }
 
         return XML::Schema::ComplexType.new(:$namespace, :$group, :@attributes, :$schema);
