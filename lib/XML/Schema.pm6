@@ -473,7 +473,10 @@ class XML::Schema::Type {
                 }
             }
             if $_.name eq $xsd-ns-prefix~'simpleContent' {
-                die "simpleContent NYI";
+                my $kind-elem = $_.elements.[0];
+
+                # this *should* return a ComplexType without a .group
+                return self.new(:$schema, :xml-element($kind-elem));
             }
         }
 
@@ -485,7 +488,13 @@ class XML::Schema::ComplexType is XML::Schema::Type {
     has $.group;
     method from-xml($xml-element) {
         my @elements = $xml-element.elements;
-        my %ret = self.group.from-xml(@elements);
+        my %ret;
+        if self.group {
+            %ret = self.group.from-xml(@elements);
+        }
+        else {
+            %ret<CONTENT> = $xml-element.nodes>>.Str.join;
+        }
         die "Extra elements!" if @elements;
         if self.attributes {
             my %seen_attrib;
@@ -516,7 +525,13 @@ class XML::Schema::ComplexType is XML::Schema::Type {
         my @nodes;
 
         my %seen;
-        @nodes.append: self.group.to-xml($data, :%seen);
+        if self.group {
+            @nodes.append: self.group.to-xml($data, :%seen);
+        }
+        else {
+            %seen<CONTENT> = 1;
+            @nodes.push: ($data<CONTENT> || '');
+        }
         if self.attributes {
             for self.attributes.list {
                 if $data{$_.name}:exists {
