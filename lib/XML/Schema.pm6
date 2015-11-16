@@ -255,6 +255,8 @@ class XML::Schema::Attribute {
 class XML::Schema::Group {
     has @.parts;
     has $.schema;
+    has $.min-occurs;
+    has $.max-occurs;
     multi method new(:$xml-element!, :$schema!, :$extend) {
         my $xsd-ns-prefix = ~$xml-element.nsPrefix('http://www.w3.org/2001/XMLSchema');
         $xsd-ns-prefix ~= ':' if $xsd-ns-prefix;
@@ -269,11 +271,17 @@ class XML::Schema::Group {
             if $_.name eq $xsd-ns-prefix~'choice' {
                 @parts.push: XML::Schema::Group::Choice.new(:xml-element($_), :$schema);
             }
+            if $_.name eq $xsd-ns-prefix~'all' {
+                @parts.push: XML::Schema::Group::All.new(:xml-element($_), :$schema);
+            }
             if $_.name eq $xsd-ns-prefix~'group' && $_<ref> {
                 @parts.push: XML::Schema::Group::Reference.new(:ref($schema.get-group($_<ref>)));
             }
         }
-        self.bless(:@parts, :$schema);
+        my $min = $xml-element<minOccurs> || 1;
+        my $max = $xml-element<maxOccurs> || 1;
+        $max = Inf if $max ~~ m:i/^unbounded$/;
+        self.bless(:@parts, :$schema, :min-occurs($min), :max-occurs($max));
     }
     method from-xml(@elements) { ... }
     method to-xml($data, :%seen) {
